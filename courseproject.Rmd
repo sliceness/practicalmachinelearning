@@ -1,0 +1,112 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "sliceness"
+date: "9/12/2017"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+Sys.setenv(LANG = "en")
+library(knitLatex)
+library(knitr)
+library(caret)
+library(randomForest)
+set.seed(8)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The report will describe:
+
+* how the model was built
+* how cross validation was used
+* what the  expected out of sample error is
+* why choices were made the way they were
+
+
+##Load and process the data
+Load training data and test data and pre-process the data before modeling.
+
+```{r load,eval=TRUE}
+trainURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(trainURL), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testURL), na.strings=c("NA","#DIV/0!",""))
+```
+
+Then initial look through the data.
+
+```{r process,eval=TRUE}
+str(training)
+```
+It looks like the first 7 columns are not useful for the modeling, so those are removed. Also, there are a few columns that have numbers labelled as factors. Those must be adjusted as well back to numerics.
+```{r process2,eval=TRUE}
+training <- training[,-c(1:7)]
+for(i in 1:(ncol(training)-1)){
+  if(class(training[, i]) == 'factor'){    
+    training[, i] <- as.numeric(as.character(training[, i]))    
+  }
+}
+```
+Since there are a lot of potential predictors, check for near zero variance to remove some of the predictors. In addition, as seen from looking at the data, there are many columns with NAs that should be removed.
+```{r process3,eval=TRUE}
+nzv <- nearZeroVar(training, saveMetrics = T)
+removed.cols <- names(training)[nzv$nzv]
+training <- training[,!(nzv$nzv)]
+cat(cat('COLUMNS REMOVED: '), cat(removed.cols, sep=', '), sep=' ')
+mostlyNA <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training <- training[, mostlyNA==F]
+```
+Then split into training and validation sets
+```{r process4,eval=TRUE}
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=F)
+training1 <- training[inTrain, ]
+training2 <- training[-inTrain, ]
+```
+
+##Modeling
+
+Since the project is to predict discrete classes, Random Forest seemed like a good model to start with, using 10-fold cross-validation to select optimal tuning parameters for the model.
+```{r modeling,eval=TRUE}
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=training1, method="rf", trControl=fitControl)
+fit$finalModel
+```
+Then estimate the out of sampling error using the validation data set by predicing the classes in the validation data set and then showing the confusion matrix to get an estimate of out of sample error.
+```{r modeling2,eval=TRUE}
+predictions <- predict(fit, newdata=training2)
+confusionMatrix(training2$classe, predictions)
+```
+
+##Retraining model with full data set
+
+Since the training data set was split into a training and validation data sets, it is important to train the model on the full training set rather than just using the model above that used the reduced training set. Only then should it predict on the test set. Thus, repeat the steps done above for the full training data set and test data set.
+```{r retraining,eval=TRUE}
+# Remove first 7 columns from test dataset (already done with training)
+testing <- testing[,-c(1:7)]
+
+# Remove variables with NZV (already done with training)
+nzv2 <- nearZeroVar(testing, saveMetrics = T)
+removed.cols <- names(testing)[nzv$nzv]
+testing <- testing[,!(nzv2$nzv)]
+cat(cat('COLUMNS REMOVED: '), cat(removed.cols, sep=', '), sep=' ')
+
+# Remove variables that have mostly NAs (already done with training)
+mostlyNA <- sapply(testing, function(x) mean(is.na(x))) > 0.95
+testing <- testing[, mostlyNA==F]
+
+# Re-fit model using full training data set
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=training, method="rf", trControl=fitControl)
+```
+##Making predictions using the test data set
+
+Now use model fit on training data set to predict the classe for the observations in test data set and print out to screen to check.
+```{r testing,eval=TRUE}
+# Predict on test set
+print(predict(fit, newdata=testing))
+```
